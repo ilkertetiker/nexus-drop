@@ -15,15 +15,42 @@ import {
   Search, 
   SlidersHorizontal, 
   CalendarDays, 
-  Clock, 
   TrendingUp, 
-  Sparkles, 
-  ArrowRight,
-  Vote,
-  CheckCircle2,
+  ArrowRight, 
+  Vote, 
   BookmarkCheck,
-  ShieldAlert
+  Star,
+  Gamepad2,
+  Sparkles
 } from "lucide-react";
+import { getFavoriteGames, toggleFavoriteGame, FavoriteGame } from "@/utils/favorites";
+
+const POPULAR_SUGGESTIONS: FavoriteGame[] = [
+  {
+    title: "Grand Theft Auto VI",
+    releaseDate: "Fall 2026",
+    type: "drop",
+    coverImage: "https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=1200&q=80",
+  },
+  {
+    title: "Ghost of Yōtei",
+    releaseDate: "2026-10-20",
+    type: "drop",
+    coverImage: "https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?auto=format&fit=crop&w=600&q=80",
+  },
+  {
+    title: "Elden Ring",
+    releaseDate: "Patch 1.14 Live",
+    type: "update",
+    coverImage: "https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&w=1200&q=80",
+  },
+  {
+    title: "Metroid Prime 4: Beyond",
+    releaseDate: "2026-10-25",
+    type: "drop",
+    coverImage: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=600&q=80",
+  },
+];
 
 export default function GamingNewsPage() {
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
@@ -31,6 +58,8 @@ export default function GamingNewsPage() {
   const [sortBy, setSortBy] = useState<"latest" | "popular" | "trending">("latest");
   const [activeArticle, setActiveArticle] = useState<NewsArticle | null>(null);
   const [bookmarkedIds, setBookmarkedIds] = useState<string[]>([]);
+  const [followedOnly, setFollowedOnly] = useState<boolean>(false);
+  const [followedTitles, setFollowedTitles] = useState<string[]>([]);
 
   // Community Poll state
   const [pollVoted, setPollVoted] = useState<number | null>(null);
@@ -52,6 +81,41 @@ export default function GamingNewsPage() {
       setBookmarkedIds(saved);
     } catch {
       setBookmarkedIds([]);
+    }
+  }, []);
+
+  // Sync followed games
+  const refreshFollowed = () => {
+    const favs = getFavoriteGames();
+    setFollowedTitles(favs.map((f) => f.title.toLowerCase().trim()));
+  };
+
+  useEffect(() => {
+    refreshFollowed();
+    window.addEventListener("nexus_favorites_updated", refreshFollowed);
+    window.addEventListener("storage", refreshFollowed);
+    return () => {
+      window.removeEventListener("nexus_favorites_updated", refreshFollowed);
+      window.removeEventListener("storage", refreshFollowed);
+    };
+  }, []);
+
+  // Parse URL query params
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const cat = params.get("category");
+      if (cat) {
+        setSelectedCategory(cat);
+      }
+      const q = params.get("search");
+      if (q) {
+        setSearchQuery(q);
+      }
+      const favs = params.get("favorites");
+      if (favs === "true") {
+        setFollowedOnly(true);
+      }
     }
   }, []);
 
@@ -87,9 +151,19 @@ export default function GamingNewsPage() {
     "Hardware"
   ];
 
+  const isArticleAboutFollowedGame = (article: NewsArticle) => {
+    if (followedTitles.length === 0) return false;
+    const textToSearch = `${article.title} ${article.excerpt} ${article.tags.join(" ")}`.toLowerCase();
+    return followedTitles.some((t) => textToSearch.includes(t) || t.split(" ").some((word) => word.length > 3 && textToSearch.includes(word)));
+  };
+
   // Filter & Sort Articles
   const filteredArticles = useMemo(() => {
     return NEWS_ARTICLES.filter((article) => {
+      // Followed games news filter
+      if (followedOnly && !isArticleAboutFollowedGame(article)) {
+        return false;
+      }
       if (selectedCategory !== "All" && article.category !== selectedCategory) {
         return false;
       }
@@ -108,7 +182,7 @@ export default function GamingNewsPage() {
       if (sortBy === "trending") return b.commentsCount - a.commentsCount;
       return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
     });
-  }, [selectedCategory, searchQuery, sortBy]);
+  }, [selectedCategory, searchQuery, sortBy, followedOnly, followedTitles]);
 
   // Featured Hero Article
   const heroArticle = NEWS_ARTICLES.find((a) => a.featured) || NEWS_ARTICLES[0];
@@ -200,17 +274,20 @@ export default function GamingNewsPage() {
         </section>
 
         {/* ========================================================
-            CATEGORY FILTERS & SEARCH TOOLBAR
+            CATEGORY FILTERS & SEARCH TOOLBAR + FOLLOWED GAMES TAB
             ======================================================== */}
         <div className="bg-slate-900/80 border border-slate-800 p-4 rounded-2xl backdrop-blur-xl flex flex-col lg:flex-row items-center justify-between gap-4">
-          {/* Category Tabs */}
+          {/* Category Tabs + Followed Games Tab */}
           <div className="flex items-center gap-1.5 overflow-x-auto w-full lg:w-auto pb-2 lg:pb-0 scrollbar-none">
             {categories.map((cat) => (
               <button
                 key={cat}
-                onClick={() => setSelectedCategory(cat)}
+                onClick={() => {
+                  setSelectedCategory(cat);
+                  setFollowedOnly(false);
+                }}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
-                  selectedCategory === cat
+                  selectedCategory === cat && !followedOnly
                     ? "bg-violet-600 text-white shadow-md shadow-violet-900/40"
                     : "text-slate-400 hover:text-white hover:bg-slate-800"
                 }`}
@@ -218,6 +295,28 @@ export default function GamingNewsPage() {
                 {cat}
               </button>
             ))}
+
+            {/* ⭐ Followed Games News Filter Tab */}
+            <button
+              onClick={() => setFollowedOnly(!followedOnly)}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 border ${
+                followedOnly
+                  ? "bg-amber-500 text-slate-950 font-black border-amber-400 shadow-md shadow-amber-950/40"
+                  : "text-amber-400 hover:text-amber-300 hover:bg-slate-800 border-amber-500/30"
+              }`}
+            >
+              <Star className={`w-3.5 h-3.5 ${followedOnly ? "fill-slate-950" : "fill-amber-400"}`} />
+              <span>⭐ Followed Games News</span>
+              {followedTitles.length > 0 && (
+                <span
+                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                    followedOnly ? "bg-slate-950 text-amber-300" : "bg-amber-400/20 text-amber-300"
+                  }`}
+                >
+                  {followedTitles.length}
+                </span>
+              )}
+            </button>
           </div>
 
           {/* Search and Sort */}
@@ -257,7 +356,7 @@ export default function GamingNewsPage() {
           <div className="lg:col-span-8 space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-black text-white tracking-tight flex items-center gap-2">
-                <span>Latest Headlines</span>
+                <span>{followedOnly ? "News for Followed Games" : "Latest Headlines"}</span>
                 <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">
                   {filteredArticles.length} Stories
                 </span>
@@ -271,7 +370,39 @@ export default function GamingNewsPage() {
               )}
             </div>
 
-            {filteredArticles.length > 0 ? (
+            {/* If Followed Only active but user follows 0 games */}
+            {followedOnly && followedTitles.length === 0 ? (
+              <div className="p-8 rounded-2xl bg-slate-900/90 border border-amber-500/30 text-center space-y-4">
+                <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-400">
+                  <Star className="w-6 h-6 fill-current" />
+                </div>
+                <div className="max-w-md mx-auto space-y-1">
+                  <h3 className="text-base font-bold text-white">
+                    You haven&apos;t followed any games yet
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Click the &quot;Follow Game&quot; button on release cards or follow popular titles below to curate your personalized gaming news feed:
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg mx-auto pt-2">
+                  {POPULAR_SUGGESTIONS.map((sug) => (
+                    <button
+                      key={sug.title}
+                      onClick={() => toggleFavoriteGame(sug)}
+                      className="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800 hover:border-amber-500/50 transition-colors text-left group"
+                    >
+                      <span className="text-xs font-bold text-white truncate pr-2 group-hover:text-amber-300">
+                        {sug.title}
+                      </span>
+                      <span className="text-[11px] text-amber-400 font-bold flex items-center gap-1 shrink-0">
+                        <Star className="w-3.5 h-3.5" /> Follow
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : filteredArticles.length > 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 {filteredArticles.map((article) => (
                   <NewsCard
@@ -292,6 +423,7 @@ export default function GamingNewsPage() {
                   onClick={() => {
                     setSelectedCategory("All");
                     setSearchQuery("");
+                    setFollowedOnly(false);
                   }}
                   className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-200 hover:text-white"
                 >
@@ -326,9 +458,24 @@ export default function GamingNewsPage() {
                 </div>
               </div>
 
-              <h3 className="text-base font-black text-white line-clamp-1">
-                {nearestRelease.title}
-              </h3>
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-base font-black text-white line-clamp-1">
+                  {nearestRelease.title}
+                </h3>
+                <button
+                  onClick={() => toggleFavoriteGame({
+                    title: nearestRelease.title,
+                    coverImage: nearestRelease.coverImage,
+                    releaseDate: nearestRelease.releaseDate,
+                    type: nearestRelease.type
+                  })}
+                  className="p-1 rounded-lg bg-slate-950 border border-slate-800 text-amber-400 hover:text-amber-300"
+                  title="Follow game"
+                >
+                  <Star className="w-3.5 h-3.5 fill-current" />
+                </button>
+              </div>
+
               <p className="text-xs text-slate-400 mt-1 line-clamp-2">
                 {nearestRelease.summary}
               </p>
@@ -358,7 +505,10 @@ export default function GamingNewsPage() {
                 {TRENDING_TOPICS.map((topic, i) => (
                   <div
                     key={topic.tag}
-                    onClick={() => setSearchQuery(topic.tag.replace("#", ""))}
+                    onClick={() => {
+                      setSearchQuery(topic.tag.replace("#", ""));
+                      setFollowedOnly(false);
+                    }}
                     className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-800 transition-colors cursor-pointer group"
                   >
                     <div className="flex items-center gap-2.5">

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { 
   GameRelease, 
   ReleaseType, 
@@ -17,17 +17,15 @@ import {
   Download, 
   Share2, 
   Check, 
-  Monitor, 
-  Gamepad, 
-  Tag, 
   Clock, 
   CheckCircle2, 
-  AlertCircle,
   Filter,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Star
 } from "lucide-react";
 import { generateIcsFile } from "@/utils/calendarExport";
+import { getFavoriteGames, toggleFavoriteGame } from "@/utils/favorites";
 
 export default function CalendarView() {
   // Calendar View State: Year and Month (defaulting to October 2026)
@@ -39,9 +37,46 @@ export default function CalendarView() {
   const [typeFilter, setTypeFilter] = useState<"all" | ReleaseType>("all");
   const [platformFilter, setPlatformFilter] = useState<"all" | GamingPlatform>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [favoritesOnly, setFavoritesOnly] = useState<boolean>(false);
+  const [followedTitles, setFollowedTitles] = useState<string[]>([]);
 
   // Share notification state
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Sync Followed Games
+  const refreshFollowedGames = () => {
+    const favs = getFavoriteGames();
+    setFollowedTitles(favs.map((f) => f.title.toLowerCase().trim()));
+  };
+
+  useEffect(() => {
+    refreshFollowedGames();
+    window.addEventListener("nexus_favorites_updated", refreshFollowedGames);
+    window.addEventListener("storage", refreshFollowedGames);
+    return () => {
+      window.removeEventListener("nexus_favorites_updated", refreshFollowedGames);
+      window.removeEventListener("storage", refreshFollowedGames);
+    };
+  }, []);
+
+  // Parse URL query params if any (e.g. /calendar?type=drop, /calendar?search=GTA, /calendar?favorites=true)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const typeParam = params.get("type");
+      if (typeParam === "drop" || typeParam === "update") {
+        setTypeFilter(typeParam);
+      }
+      const searchParam = params.get("search");
+      if (searchParam) {
+        setSearchQuery(searchParam);
+      }
+      const favParam = params.get("favorites");
+      if (favParam === "true") {
+        setFavoritesOnly(true);
+      }
+    }
+  }, []);
 
   // Month Names
   const monthNames = [
@@ -76,11 +111,29 @@ export default function CalendarView() {
     setSelectedDate("2026-10-20");
   };
 
+  const isGameFollowed = (title: string) => {
+    const target = title.toLowerCase().trim();
+    return followedTitles.some((t) => target.includes(t) || t.includes(target));
+  };
+
+  const handleToggleFollow = (release: GameRelease) => {
+    toggleFavoriteGame({
+      title: release.title,
+      coverImage: release.coverImage,
+      releaseDate: release.releaseDate,
+      type: release.type,
+    });
+  };
+
   // Filtered releases overall
   const filteredReleases = useMemo(() => {
     return GAME_RELEASES.filter((release) => {
       // Type filter (drop vs update)
       if (typeFilter !== "all" && release.type !== typeFilter) {
+        return false;
+      }
+      // Favorites filter
+      if (favoritesOnly && !isGameFollowed(release.title)) {
         return false;
       }
       // Platform filter
@@ -99,7 +152,7 @@ export default function CalendarView() {
       }
       return true;
     });
-  }, [typeFilter, platformFilter, searchQuery]);
+  }, [typeFilter, favoritesOnly, platformFilter, searchQuery, followedTitles]);
 
   // Releases mapped by date for fast calendar lookup
   const releasesByDate = useMemo(() => {
@@ -114,14 +167,10 @@ export default function CalendarView() {
 
   // Calendar Grid Calculation
   const calendarDays = useMemo(() => {
-    // Days in current month
     const totalDaysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-    // Day of the week for 1st of month (0 = Sun, 1 = Mon ... 6 = Sat)
     let firstDayIndex = new Date(currentYear, currentMonth, 1).getDay();
-    // Shift so 0 = Monday, 6 = Sunday
     firstDayIndex = firstDayIndex === 0 ? 6 : firstDayIndex - 1;
 
-    // Previous month filler days
     const totalDaysInPrevMonth = new Date(currentYear, currentMonth, 0).getDate();
     const prevMonthDays = [];
     for (let i = firstDayIndex - 1; i >= 0; i--) {
@@ -132,7 +181,6 @@ export default function CalendarView() {
       });
     }
 
-    // Current month days
     const currentMonthDays = [];
     for (let day = 1; day <= totalDaysInMonth; day++) {
       const monthStr = String(currentMonth + 1).padStart(2, "0");
@@ -147,7 +195,6 @@ export default function CalendarView() {
       });
     }
 
-    // Next month padding to fill out 35 or 42 grid cells
     const totalFilled = prevMonthDays.length + currentMonthDays.length;
     const remaining = totalFilled <= 35 ? 35 - totalFilled : 42 - totalFilled;
     const nextMonthDays = [];
@@ -205,7 +252,7 @@ export default function CalendarView() {
           <div>
             <div className="flex items-center gap-2 mb-2">
               <span className="text-xs font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center gap-1.5">
-                <CalendarIcon className="w-3.5 h-3.5" /> Desktop Master Schedule
+                <CalendarIcon className="w-3.5 h-3.5" /> Release & Patch Schedule
               </span>
               <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
                 {filteredReleases.length} tracked releases
@@ -250,44 +297,69 @@ export default function CalendarView() {
           </div>
         </div>
 
-        {/* Filter Controls: Toggle between Drops and Updates */}
+        {/* Filter Controls: Toggle between Drops and Updates + Favorites */}
         <div className="pt-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          {/* Main Switcher: All vs Drops vs Updates */}
-          <div className="flex items-center bg-slate-950 p-1.5 rounded-2xl border border-slate-800/90 shadow-inner">
-            <button
-              onClick={() => setTypeFilter("all")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                typeFilter === "all"
-                  ? "bg-slate-800 text-white shadow-md border border-slate-700"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5" />
-              All Releases
-            </button>
+          {/* Main Switcher: All vs Drops vs Updates + Followed Only */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center bg-slate-950 p-1.5 rounded-2xl border border-slate-800/90 shadow-inner">
+              <button
+                onClick={() => setTypeFilter("all")}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+                  typeFilter === "all"
+                    ? "bg-slate-800 text-white shadow-md border border-slate-700"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                All
+              </button>
 
-            <button
-              onClick={() => setTypeFilter("drop")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                typeFilter === "drop"
-                  ? "bg-emerald-600 text-white shadow-lg shadow-emerald-900/50"
-                  : "text-slate-400 hover:text-emerald-400"
-              }`}
-            >
-              <Flame className="w-3.5 h-3.5 text-emerald-300" />
-              🔥 New Game Drops
-            </button>
+              <button
+                onClick={() => setTypeFilter("drop")}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+                  typeFilter === "drop"
+                    ? "bg-emerald-600 text-white shadow-lg shadow-emerald-900/50"
+                    : "text-slate-400 hover:text-emerald-400"
+                }`}
+              >
+                <Flame className="w-3.5 h-3.5 text-emerald-300" />
+                🔥 Game Drops
+              </button>
 
+              <button
+                onClick={() => setTypeFilter("update")}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+                  typeFilter === "update"
+                    ? "bg-cyan-600 text-white shadow-lg shadow-cyan-900/50"
+                    : "text-slate-400 hover:text-cyan-400"
+                }`}
+              >
+                <Zap className="w-3.5 h-3.5 text-cyan-300" />
+                ⚡ Major Patches
+              </button>
+            </div>
+
+            {/* ⭐ Followed Games Only Button */}
             <button
-              onClick={() => setTypeFilter("update")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                typeFilter === "update"
-                  ? "bg-cyan-600 text-white shadow-lg shadow-cyan-900/50"
-                  : "text-slate-400 hover:text-cyan-400"
+              onClick={() => setFavoritesOnly(!favoritesOnly)}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-2xl text-xs font-bold transition-all border ${
+                favoritesOnly
+                  ? "bg-amber-500 text-slate-950 font-black border-amber-400 shadow-lg shadow-amber-950/40"
+                  : "bg-slate-950 hover:bg-slate-850 text-amber-400 border-amber-500/30"
               }`}
+              title="Show releases only for followed games"
             >
-              <Zap className="w-3.5 h-3.5 text-cyan-300" />
-              ⚡ Major Updates & Patches
+              <Star className={`w-3.5 h-3.5 ${favoritesOnly ? "fill-slate-950" : "fill-amber-400"}`} />
+              <span>⭐ Followed Games Only</span>
+              {followedTitles.length > 0 && (
+                <span
+                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                    favoritesOnly ? "bg-slate-950 text-amber-300" : "bg-amber-400/20 text-amber-300"
+                  }`}
+                >
+                  {followedTitles.length}
+                </span>
+              )}
             </button>
           </div>
 
@@ -315,7 +387,7 @@ export default function CalendarView() {
               placeholder="Search release..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="bg-slate-950 border border-slate-800 text-slate-200 placeholder-slate-500 text-xs rounded-xl px-3 py-2 w-48 focus:outline-none focus:border-cyan-500 transition-colors"
+              className="bg-slate-950 border border-slate-800 text-slate-200 placeholder-slate-500 text-xs rounded-xl px-3 py-2 w-44 focus:outline-none focus:border-cyan-500 transition-colors"
             />
           </div>
         </div>
@@ -356,13 +428,13 @@ export default function CalendarView() {
             const events = cell.events || [];
             const dropsCount = events.filter((e) => e.type === "drop").length;
             const updatesCount = events.filter((e) => e.type === "update").length;
+            const hasFollowedEvent = events.some((e) => isGameFollowed(e.title));
 
             return (
               <div
                 key={cell.dateString}
                 onClick={() => {
                   setSelectedDate(cell.dateString);
-                  // Smoothly scroll to the details below calendar
                   const el = document.getElementById("selected-date-details");
                   if (el) {
                     el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -376,19 +448,26 @@ export default function CalendarView() {
                     : "bg-slate-950/50 border-slate-900/80 hover:border-slate-800 hover:bg-slate-900/40"
                 }`}
               >
-                {/* Header inside day cell: date number & today indicator */}
+                {/* Header inside day cell: date number & indicators */}
                 <div className="flex items-center justify-between">
-                  <span
-                    className={`text-sm font-bold ${
-                      isSelected
-                        ? "text-cyan-400"
-                        : isToday
-                        ? "text-emerald-400 font-extrabold"
-                        : "text-slate-300"
-                    }`}
-                  >
-                    {cell.dayNumber}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className={`text-sm font-bold ${
+                        isSelected
+                          ? "text-cyan-400"
+                          : isToday
+                          ? "text-emerald-400 font-extrabold"
+                          : "text-slate-300"
+                      }`}
+                    >
+                      {cell.dayNumber}
+                    </span>
+                    {hasFollowedEvent && (
+                      <span title="Contains a followed game release!">
+                        <Star className="w-3 h-3 text-amber-400 fill-amber-400 animate-pulse" />
+                      </span>
+                    )}
+                  </div>
 
                   {isToday && (
                     <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
@@ -405,24 +484,32 @@ export default function CalendarView() {
 
                 {/* Event Pills inside Day Cell */}
                 <div className="space-y-1 my-1 overflow-hidden">
-                  {events.slice(0, 2).map((ev) => (
-                    <div
-                      key={ev.id}
-                      className={`text-[10px] font-bold truncate px-1.5 py-0.5 rounded-lg border flex items-center gap-1 ${
-                        ev.type === "drop"
-                          ? "bg-emerald-950/80 border-emerald-700/60 text-emerald-300"
-                          : "bg-cyan-950/80 border-cyan-700/60 text-cyan-300"
-                      }`}
-                      title={`${ev.title} (${ev.type === "drop" ? "Drop" : "Update"})`}
-                    >
-                      {ev.type === "drop" ? (
-                        <Flame className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
-                      ) : (
-                        <Zap className="w-2.5 h-2.5 text-cyan-400 shrink-0" />
-                      )}
-                      <span className="truncate">{ev.title}</span>
-                    </div>
-                  ))}
+                  {events.slice(0, 2).map((ev) => {
+                    const followed = isGameFollowed(ev.title);
+                    return (
+                      <div
+                        key={ev.id}
+                        className={`text-[10px] font-bold truncate px-1.5 py-0.5 rounded-lg border flex items-center justify-between gap-1 ${
+                          ev.type === "drop"
+                            ? "bg-emerald-950/80 border-emerald-700/60 text-emerald-300"
+                            : "bg-cyan-950/80 border-cyan-700/60 text-cyan-300"
+                        } ${followed ? "ring-1 ring-amber-400/60" : ""}`}
+                        title={`${ev.title} (${ev.type === "drop" ? "Drop" : "Update"})${followed ? " • ⭐ Followed" : ""}`}
+                      >
+                        <div className="flex items-center gap-1 truncate">
+                          {ev.type === "drop" ? (
+                            <Flame className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
+                          ) : (
+                            <Zap className="w-2.5 h-2.5 text-cyan-400 shrink-0" />
+                          )}
+                          <span className="truncate">{ev.title}</span>
+                        </div>
+                        {followed && (
+                          <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400 shrink-0" />
+                        )}
+                      </div>
+                    );
+                  })}
 
                   {events.length > 2 && (
                     <div className="text-[9px] text-slate-400 font-semibold pl-1">
@@ -466,10 +553,14 @@ export default function CalendarView() {
               </span>
               <strong className="text-slate-300">Major Updates</strong> (Patches & DLC)
             </span>
+            <span className="flex items-center gap-1.5">
+              <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+              <strong className="text-amber-300">Followed Games</strong>
+            </span>
           </div>
 
           <div className="text-xs text-slate-500">
-            Click any calendar day to inspect full patch notes, pre-orders, and export to calendar.
+            Click any date below to inspect releases, patch highlights, or toggle following status.
           </div>
         </div>
       </div>
@@ -512,6 +603,7 @@ export default function CalendarView() {
           <div className="grid grid-cols-1 gap-6">
             {selectedDateReleases.map((release) => {
               const isDrop = release.type === "drop";
+              const followed = isGameFollowed(release.title);
 
               return (
                 <div
@@ -570,31 +662,56 @@ export default function CalendarView() {
                     {/* Detailed Information Column */}
                     <div className="lg:col-span-8 flex flex-col justify-between space-y-6">
                       <div className="space-y-4">
-                        {/* Tags and Platforms */}
-                        <div className="flex flex-wrap items-center gap-2">
-                          {release.platforms.map((p) => (
-                            <span
-                              key={p}
-                              className="text-xs font-bold px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-200"
-                            >
-                              {p}
-                            </span>
-                          ))}
-                          <span className="text-slate-600">•</span>
-                          {release.genre.map((g) => (
-                            <span
-                              key={g}
-                              className="text-xs font-medium text-slate-400"
-                            >
-                              {g}
-                            </span>
-                          ))}
+                        {/* Tags and Follow action */}
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {release.platforms.map((p) => (
+                              <span
+                                key={p}
+                                className="text-xs font-bold px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-slate-200"
+                              >
+                                {p}
+                              </span>
+                            ))}
+                            <span className="text-slate-600">•</span>
+                            {release.genre.map((g) => (
+                              <span
+                                key={g}
+                                className="text-xs font-medium text-slate-400"
+                              >
+                                {g}
+                              </span>
+                            ))}
+                          </div>
+
+                          {/* Quick Follow Button */}
+                          <button
+                            onClick={() => handleToggleFollow(release)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                              followed
+                                ? "bg-amber-500/20 border-amber-400 text-amber-300 shadow-sm shadow-amber-950/40"
+                                : "bg-slate-950 border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800"
+                            }`}
+                            title={followed ? "Unfollow this game" : "Follow this game for news & updates"}
+                          >
+                            <Star
+                              className={`w-3.5 h-3.5 ${
+                                followed ? "text-amber-400 fill-amber-400" : "text-slate-400"
+                              }`}
+                            />
+                            <span>{followed ? "Following" : "Follow Game"}</span>
+                          </button>
                         </div>
 
                         {/* Title and Credits */}
                         <div>
-                          <h3 className="text-2xl md:text-3xl font-black text-white tracking-tight">
-                            {release.title}
+                          <h3 className="text-2xl md:text-3xl font-black text-white tracking-tight flex items-center gap-2.5">
+                            <span>{release.title}</span>
+                            {followed && (
+                              <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/40">
+                                ⭐ Followed
+                              </span>
+                            )}
                           </h3>
                           <p className="text-xs text-slate-400 mt-1">
                             Developed by <strong className="text-slate-200">{release.developer}</strong> • Published by{" "}
@@ -733,14 +850,26 @@ export default function CalendarView() {
             </div>
             <div className="max-w-md mx-auto space-y-1">
               <h3 className="text-base font-bold text-white">
-                No releases scheduled on {formattedSelectedDate}
+                {favoritesOnly
+                  ? `No followed game releases on ${formattedSelectedDate}`
+                  : `No releases scheduled on ${formattedSelectedDate}`}
               </h3>
               <p className="text-xs text-slate-400">
-                Publishers haven&apos;t pinned an official launch or maintenance window for this specific date yet.
+                {favoritesOnly
+                  ? "None of your followed games have a scheduled drop or update on this date."
+                  : "Publishers haven't pinned an official launch or maintenance window for this specific date yet."}
               </p>
+              {favoritesOnly && (
+                <button
+                  onClick={() => setFavoritesOnly(false)}
+                  className="mt-2 text-xs font-bold text-cyan-400 hover:underline"
+                >
+                  Clear Followed Games Filter
+                </button>
+              )}
             </div>
 
-            {nearestDrop && (
+            {nearestDrop && !favoritesOnly && (
               <div className="pt-4 max-w-lg mx-auto">
                 <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 text-left flex items-center justify-between gap-4">
                   <div className="flex items-center gap-3">

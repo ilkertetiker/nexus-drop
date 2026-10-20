@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { 
@@ -8,36 +8,12 @@ import {
   CalendarDays, 
   Newspaper, 
   Flame, 
-  Sparkles, 
-  Search, 
-  Bookmark, 
-  ExternalLink,
-  ChevronRight,
-  ShieldCheck
+  Sparkles
 } from "lucide-react";
+import FavoritesPopover from "@/components/FavoritesPopover";
 
 export default function Navbar() {
   const pathname = usePathname();
-  const [savedCount, setSavedCount] = useState<number>(0);
-
-  useEffect(() => {
-    const updateSavedCount = () => {
-      try {
-        const saved = JSON.parse(localStorage.getItem("nexus_saved_items") || "[]");
-        setSavedCount(saved.length);
-      } catch {
-        setSavedCount(0);
-      }
-    };
-
-    updateSavedCount();
-    window.addEventListener("storage", updateSavedCount);
-    window.addEventListener("nexus_saved_updated", updateSavedCount);
-    return () => {
-      window.removeEventListener("storage", updateSavedCount);
-      window.removeEventListener("nexus_saved_updated", updateSavedCount);
-    };
-  }, []);
 
   const navLinks = [
     {
@@ -57,7 +33,7 @@ export default function Navbar() {
 
   return (
     <header className="sticky top-0 z-50 w-full backdrop-blur-xl bg-slate-950/85 border-b border-slate-800/80 shadow-2xl shadow-black/40">
-      {/* Top Desktop Ticker */}
+      {/* Top Desktop Ticker without Vercel/Desktop text */}
       <div className="bg-gradient-to-r from-violet-950/60 via-slate-900/90 to-cyan-950/60 border-b border-slate-800/50 py-1.5 px-6 text-xs text-slate-300">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3 overflow-hidden">
@@ -80,14 +56,6 @@ export default function Navbar() {
                 Next-Gen Switch 2 backwards compatibility officially confirmed
               </span>
             </div>
-          </div>
-
-          <div className="flex items-center gap-4 text-slate-400 text-xs shrink-0 pl-4">
-            <span className="inline-flex items-center gap-1 text-slate-400 hover:text-slate-200 transition-colors">
-              <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" /> Vercel Ready
-            </span>
-            <span className="text-slate-700">|</span>
-            <span>Desktop Optimized</span>
           </div>
         </div>
       </div>
@@ -154,16 +122,9 @@ export default function Navbar() {
           })}
         </nav>
 
-        {/* Right CTA Actions */}
+        {/* Right Actions: Followed Games Popover (Removed 'Browse Drop Calendar') */}
         <div className="flex items-center gap-3">
-          <Link
-            href="/calendar"
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-gradient-to-r from-violet-600 to-cyan-600 hover:from-violet-500 hover:to-cyan-500 text-white shadow-lg shadow-violet-600/20 hover:shadow-cyan-500/30 transition-all duration-200"
-          >
-            <CalendarDays className="w-4 h-4" />
-            <span>Browse Drop Calendar</span>
-            <ChevronRight className="w-3.5 h-3.5 opacity-70" />
-          </Link>
+          <FavoritesPopover />
         </div>
       </div>
     </header>
