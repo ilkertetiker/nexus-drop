@@ -23,6 +23,8 @@
 # misc
 .DS_Store
 *.pem
+Gaming-Website/
+workspaces/
 
 # debug
 npm-debug.log*
